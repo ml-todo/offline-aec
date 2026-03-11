@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AECMOS Evaluation - AEC Comparison</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:system-ui;background:#0d0d12;color:#e8e8f0;padding:20px}
+    h1{font-size:22px;background:linear-gradient(90deg,#00d4ff,#ff006e);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:10px}
+    .sub{color:#9aa0aa;font-size:13px;margin-bottom:16px;line-height:1.4}
+    .row{display:flex;gap:16px;flex-wrap:wrap}
+    .card{flex:1;min-width:320px;background:#15151d;border:1px solid #252532;border-radius:10px;padding:14px}
+    h2{font-size:14px;color:#cfd4dd;margin-bottom:10px}
+    label{display:block;font-size:12px;color:#9aa0aa;margin:10px 0 6px}
+    select,input[type="file"],button{font:inherit}
+    select,input[type="text"]{width:100%;padding:8px 10px;background:#0f0f16;border:1px solid #252532;border-radius:8px;color:#e8e8f0}
+    input[type="file"]{width:100%;padding:8px 10px;background:#0f0f16;border:1px dashed #252532;border-radius:8px;color:#9aa0aa}
+    .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+    button{padding:9px 12px;background:#0f0f16;border:1px solid #252532;border-radius:8px;color:#e8e8f0;cursor:pointer}
+    button.primary{background:linear-gradient(90deg,#00d4ff,#9d4edd);border:0;color:#000;font-weight:600}
+    button:disabled{opacity:.5;cursor:not-allowed}
+    .out{margin-top:14px;padding:10px;background:#0a0a0f;border:1px solid #252532;border-radius:8px;font-family:ui-monospace, SFMono-Regular, Menlo, monospace;font-size:12px;white-space:pre-wrap}
+    a{color:#00d4ff;text-decoration:none}
+    .topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:12px;flex-wrap:wrap}
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div>
+      <h1>AECMOS Evaluation</h1>
+      <div class="sub">
+        Scores enhanced audio using the AECMOS ONNX model (echo MOS + degradation MOS).
+        For far-end single talk, we also compute ERLE (MIC vs ENH).
+      </div>
+    </div>
+    <div class="sub">
+      <a href="/evaluation/index.html">← Back to comparison</a>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="card">
+      <h2>Score built-in TSPNN samples</h2>
+
+      <label for="scenario">Scenario</label>
+      <select id="scenario">
+        <option value="doubletalk">Double Talk</option>
+        <option value="farend-singletalk">Far-end Single Talk</option>
+        <option value="nearend-singletalk">Near-end Single Talk</option>
+      </select>
+
+      <label for="enh">Enhanced source</label>
+      <select id="enh">
+        <option value="ours">ours (TSPNN final)</option>
+        <option value="coarse_stage">coarse_stage</option>
+      </select>
+
+      <label for="sample">Sample</label>
+      <select id="sample"></select>
+
+      <div class="actions">
+        <button id="randBtn">Random</button>
+        <button class="primary" id="scoreSampleBtn">Score sample</button>
+      </div>
+
+      <div class="out" id="sampleOut">Ready.</div>
+    </div>
+
+    <div class="card">
+      <h2>Score uploaded wavs</h2>
+
+      <label for="talkType">Talk type</label>
+      <select id="talkType">
+        <option value="dt">dt (doubletalk)</option>
+        <option value="st">st (far-end singletalk)</option>
+        <option value="nst">nst (near-end/earphone singletalk)</option>
+      </select>
+
+      <label>LPB wav (far-end reference)</label>
+      <input id="lpbWav" type="file" accept=".wav,audio/wav" />
+
+      <label>MIC wav (echo contaminated)</label>
+      <input id="micWav" type="file" accept=".wav,audio/wav" />
+
+      <label>ENH wav (your enhanced output)</label>
+      <input id="enhWav" type="file" accept=".wav,audio/wav" />
+
+      <div class="actions">
+        <button class="primary" id="scoreUploadBtn">Score upload</button>
+      </div>
+
+      <div class="out" id="uploadOut">Ready.</div>
+    </div>
+  </div>
+
+  <script>
+    const scenarioSel = document.getElementById('scenario');
+    const enhSel = document.getElementById('enh');
+    const sampleSel = document.getElementById('sample');
+    const sampleOut = document.getElementById('sampleOut');
+    const uploadOut = document.getElementById('uploadOut');
+
+    function fmtRes(j){
+      const lines = [];
+      if (j.error) {
+        lines.push(`[error] ${j.error}`);
+        if (j.hint) lines.push(`hint: ${j.hint}`);
+        if (j.missing) lines.push(`missing:\n- ${j.missing.join('\n- ')}`);
+        if (j.trace) lines.push(`\ntrace:\n${j.trace}`);
+        return lines.join('\n');
+      }
+      if (j.talk_type) lines.push(`talk_type: ${j.talk_type}`);
+      if (j.echo_mos != null) lines.push(`echo_mos: ${j.echo_mos.toFixed(4)}`);
+      if (j.deg_mos != null) lines.push(`deg_mos:  ${j.deg_mos.toFixed(4)}`);
+      if (j.erle != null) lines.push(`erle:     ${j.erle.toFixed(4)}`);
+      if (j.scenario) lines.push(`scenario: ${j.scenario}`);
+      if (j.enh) lines.push(`enh:      ${j.enh}`);
+      if (j.sample) lines.push(`sample:   ${j.sample}`);
+      return lines.join('\n');
+    }
+
+    async function loadSamples(){
+      const sc = scenarioSel.value;
+      const key = sc.replace('-','_');
+      sampleOut.textContent = 'Loading sample list...';
+      try{
+        const resp = await fetch(`/evaluation/samples_${key}.json`);
+        const arr = await resp.json();
+        sampleSel.innerHTML = arr.slice(0, 200).map(s => `<option value="${s}">${s.slice(0, 10)}...</option>`).join('');
+        sampleOut.textContent = `Loaded ${arr.length} samples.`;
+      }catch(e){
+        sampleSel.innerHTML = '';
+        sampleOut.textContent = `[error] failed to load sample list: ${String(e)}`;
+      }
+    }
+
+    document.getElementById('randBtn').onclick = () => {
+      if (!sampleSel.options.length) return;
+      const idx = Math.floor(Math.random() * sampleSel.options.length);
+      sampleSel.selectedIndex = idx;
+    };
+
+    document.getElementById('scoreSampleBtn').onclick = async () => {
+      const scenario = scenarioSel.value;
+      const enh = enhSel.value;
+      const sample = sampleSel.value;
+      if (!sample) {
+        sampleOut.textContent = '[error] pick a sample first.';
+        return;
+      }
+      sampleOut.textContent = 'Scoring...';
+      const url = `/api/aecmos_sample?scenario=${encodeURIComponent(scenario)}&enh=${encodeURIComponent(enh)}&sample=${encodeURIComponent(sample)}`;
+      try{
+        const resp = await fetch(url);
+        const j = await resp.json();
+        sampleOut.textContent = fmtRes(j);
+      }catch(e){
+        sampleOut.textContent = `[error] ${String(e)}`;
+      }
+    };
+
+    scenarioSel.onchange = loadSamples;
+    loadSamples();
+
+    document.getElementById('scoreUploadBtn').onclick = async () => {
+      const talkType = document.getElementById('talkType').value;
+      const lpb = document.getElementById('lpbWav').files[0];
+      const mic = document.getElementById('micWav').files[0];
+      const enh = document.getElementById('enhWav').files[0];
+      if (!lpb || !mic || !enh) {
+        uploadOut.textContent = '[error] please choose all three wav files (lpb, mic, enh).';
+        return;
+      }
+      uploadOut.textContent = 'Uploading + scoring...';
+      const fd = new FormData();
+      fd.append('talk_type', talkType);
+      fd.append('lpb_wav', lpb, lpb.name);
+      fd.append('mic_wav', mic, mic.name);
+      fd.append('enh_wav', enh, enh.name);
+
+      try{
+        const resp = await fetch('/api/aecmos_upload', { method: 'POST', body: fd });
+        const j = await resp.json();
+        uploadOut.textContent = fmtRes(j);
+      }catch(e){
+        uploadOut.textContent = `[error] ${String(e)}`;
+      }
+    };
+  </script>
+</body>
+</html>

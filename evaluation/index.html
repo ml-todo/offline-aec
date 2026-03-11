@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AEC Comparison - TSPNN, DTLN-aec, WebRTC, Ours</title>
+    <script src="https://unpkg.com/wavesurfer.js@7"></script>
+    <style>
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{font-family:system-ui;background:#0d0d12;color:#e8e8f0;padding:20px}
+        h1{text-align:center;font-size:24px;background:linear-gradient(90deg,#00d4ff,#ff006e);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:16px}
+        .ctrl{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap}
+        select,button{font:inherit;padding:8px 12px;background:#15151d;border:1px solid #252532;border-radius:6px;color:#e8e8f0;cursor:pointer}
+        .load{background:linear-gradient(90deg,#00d4ff,#9d4edd);border:0;color:#000}
+        .tracks{display:flex;flex-direction:column;gap:8px}
+        .t{background:#15151d;border:1px solid #252532;border-radius:8px;padding:10px;border-left:3px solid var(--c);transition:opacity .3s,filter .3s}
+        .t.off{opacity:.35;filter:grayscale(1)}
+        .t .h{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;font-size:13px}
+        .t .l{color:#666;font-size:11px;margin-left:8px}
+        .t .r{display:flex;align-items:center;gap:10px}
+        .t .time{font-family:monospace;font-size:11px;color:#666}
+        .play{width:28px;height:28px;border-radius:50%;background:var(--c);border:0;color:#000;cursor:pointer;font-size:11px}
+        .wf{height:50px;background:#0a0a0f;border-radius:4px;cursor:pointer}
+        .bar{height:3px;background:#1a1a24;border-radius:2px;margin-top:6px}
+        .bar div{height:100%;background:var(--c);border-radius:2px;width:0}
+        footer{text-align:center;margin-top:20px;font-size:12px;color:#666}
+        footer a{color:#00d4ff}
+    </style>
+</head>
+<body>
+    <h1>AEC Comparison</h1>
+    <div class="ctrl">
+        <select id="sc"><option value="doubletalk">Double Talk</option><option value="farend-singletalk">Far-end Single Talk</option><option value="nearend-singletalk">Near-end Single Talk</option></select>
+        <select id="sp"></select>
+        <select id="ck"></select>
+        <button onclick="rand()">🎲 Random</button>
+        <button class="load" onclick="load()">Load</button>
+        <button onclick="window.location.href='/evaluation/evaluate.html'">Evaluate (AECMOS)</button>
+    </div>
+    <div class="tracks" id="tracks"></div>
+    <footer>
+        TSPNN (offline) · DTLN-aec (online) · WebRTC AEC (online) · Our Model (online) ·
+        <a href="https://github.com/microsoft/AEC-Challenge">AEC Challenge</a>
+    </footer>
+<script>
+const T=[
+    {id:'far',name:'Far-end',label:'LPB · reference',c:'#00d4ff'},
+    {id:'near',name:'Near-end',label:'MIC · echo contaminated',c:'#ff006e'},
+    {id:'coarse',name:'TSPNN Coarse',label:'TSPNN intermediate (offline)',c:'#ffd700'},
+    {id:'out',name:'TSPNN Output',label:'TSPNN final (offline)',c:'#00ff88'},
+    {id:'dtln',name:'DTLN-aec',label:'online baseline',c:'#ff9f1c'},
+    {id:'webrtc',name:'WebRTC AEC',label:'online baseline',c:'#4cc9f0'},
+    {id:'ckpt',name:'Our Model',label:'your trained checkpoint (online)',c:'#9d4edd'}
+];
+let ws={},playing=null,samples=[],cur=null,sc='doubletalk';
+let blobUrls={dtln:null,webrtc:null,ckpt:null};
+
+document.getElementById('tracks').innerHTML=T.map(t=>`
+<div class="t" id="t-${t.id}" style="--c:${t.c}">
+    <div class="h"><span>${t.name}<span class="l">${t.label}</span></span>
+    <div class="r"><span class="time" id="tm-${t.id}">0:00/0:00</span><button class="play" onclick="play('${t.id}')">▶</button></div></div>
+    <div class="wf" id="wf-${t.id}"></div><div class="bar"><div id="b-${t.id}"></div></div>
+</div>`).join('');
+
+T.forEach(t=>{
+    ws[t.id]=WaveSurfer.create({container:`#wf-${t.id}`,waveColor:t.c,progressColor:t.c+'99',cursorColor:'#fff',cursorWidth:1,barWidth:2,barGap:1,height:50,normalize:true});
+    ws[t.id].on('audioprocess',()=>upd(t.id));
+    ws[t.id].on('finish',()=>stop(t.id));
+});
+
+const fmt=s=>`${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`;
+const upd=id=>{let w=ws[id],d=w.getDuration()||1,c=w.getCurrentTime();document.getElementById(`tm-${id}`).textContent=`${fmt(c)}/${fmt(d)}`;document.getElementById(`b-${id}`).style.width=`${c/d*100}%`};
+const grey=()=>T.forEach(t=>document.getElementById(`t-${t.id}`).classList.toggle('off',playing&&playing!==t.id));
+
+function play(id){
+    if(playing&&playing!==id){ws[playing].pause();document.querySelector(`#t-${playing} .play`).textContent='▶'}
+    if(playing===id&&ws[id].isPlaying()){ws[id].pause();document.querySelector(`#t-${id} .play`).textContent='▶';playing=null;grey();return}
+    ws[id].play();document.querySelector(`#t-${id} .play`).textContent='⏸';playing=id;grey();
+}
+function stop(id){document.querySelector(`#t-${id} .play`).textContent='▶';if(playing===id)playing=null;grey()}
+
+async function loadList(){
+    try{samples=await(await fetch(`/evaluation/samples_${sc.replace('-','_')}.json`)).json()}catch{samples=[]}
+    document.getElementById('sp').innerHTML=samples.slice(0,100).map(s=>`<option value="${s}">${s.slice(0,10)}...</option>`).join('');
+    cur=samples[0]||null;
+}
+
+async function loadCheckpoints(){
+    const sel=document.getElementById('ck');
+    try{
+        const j=await(await fetch('/api/checkpoints')).json();
+        const arr=(j && j.checkpoints) ? j.checkpoints : [];
+        sel.innerHTML = arr.map(p=>`<option value="${p}">${p}</option>`).join('');
+        const prefer = arr.find(p=>p.includes('runs/full_aec_synth/ckpt_final.pt')) || arr.find(p=>p.includes('ckpt_final'));
+        if (prefer) sel.value = prefer;
+    }catch{
+        sel.innerHTML = `<option value="external/TSPNN/runs/full_aec_synth/ckpt_final.pt">TSPNN ckpt</option>`;
+    }
+}
+async function load(){
+    if(!cur)return;if(playing){ws[playing].pause();stop(playing)}
+    const b='/results',f=sc;
+    const ck=document.getElementById('ck').value || 'external/TSPNN/runs/full_aec_synth/ckpt_final.pt';
+
+    async function loadEnhanced(id, url){
+        try{
+            const resp = await fetch(url);
+            if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            if(blobUrls[id]) URL.revokeObjectURL(blobUrls[id]);
+            blobUrls[id] = URL.createObjectURL(await resp.blob());
+            await ws[id].load(blobUrls[id]);
+        }catch(e){ console.error(id+' load error', e); }
+    }
+    const dtlnPromise = loadEnhanced('dtln', `/api/enhance_dtln_sample?scenario=${encodeURIComponent(f)}&sample=${encodeURIComponent(cur)}`);
+    const webrtcPromise = loadEnhanced('webrtc', `/api/enhance_webrtc_sample?scenario=${encodeURIComponent(f)}&sample=${encodeURIComponent(cur)}`);
+    const ckptPromise = loadEnhanced('ckpt', `/api/enhance_sample?scenario=${encodeURIComponent(f)}&sample=${encodeURIComponent(cur)}&ckpt=${encodeURIComponent(ck)}`);
+
+    await Promise.all([
+        ws.far.load(`${b}/blind_test_set_interspeech2021/${f}/${cur}_lpb.wav`).catch(()=>{}),
+        ws.near.load(`${b}/blind_test_set_interspeech2021/${f}/${cur}_mic.wav`).catch(()=>{}),
+        ws.coarse.load(`${b}/output/coarse_stage/${f}/${cur}_mic.wav`).catch(()=>{}),
+        ws.out.load(`${b}/output/ours/${f}/${cur}_mic.wav`).catch(()=>{}),
+        dtlnPromise,
+        webrtcPromise,
+        ckptPromise
+    ]);
+    T.forEach(t=>upd(t.id));
+}
+function rand(){cur=samples[Math.floor(Math.random()*samples.length)];document.getElementById('sp').value=cur;load()}
+
+document.getElementById('sc').onchange=e=>{sc=e.target.value;loadList()};
+document.getElementById('sp').onchange=e=>cur=e.target.value;
+document.getElementById('ck').onchange=_=>{ if(cur) load(); };
+document.onkeydown=e=>{if(e.code==='Space'&&e.target.tagName!=='SELECT'){e.preventDefault();play(playing||'far')}};
+loadList();
+loadCheckpoints();
+</script>
+</body>
+</html>
