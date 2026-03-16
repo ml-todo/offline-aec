@@ -1,0 +1,13 @@
+{
+  "name": "webrtc-aec3-runner",
+  "version": "1.0.0",
+  "description": "Node runner for WebRTC AEC3 (ennuicastr/webrtcaec3.js), used by offline-aec evaluation server",
+  "type": "module",
+  "main": "run_aec3.js",
+  "scripts": {
+    "run": "node run_aec3.js"
+  },
+  "dependencies": {
+    "@ennuicastr/webrtcaec3.js": "^0.3.0"
+  }
+}

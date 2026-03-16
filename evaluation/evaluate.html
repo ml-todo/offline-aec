@@ -106,14 +106,14 @@
       if (j.error) {
         lines.push(`[error] ${j.error}`);
         if (j.hint) lines.push(`hint: ${j.hint}`);
-        if (j.missing) lines.push(`missing:\n- ${j.missing.join('\n- ')}`);
+        if (Array.isArray(j.missing) && j.missing.length) lines.push(`missing:\n- ${j.missing.join('\n- ')}`);
         if (j.trace) lines.push(`\ntrace:\n${j.trace}`);
         return lines.join('\n');
       }
       if (j.talk_type) lines.push(`talk_type: ${j.talk_type}`);
-      if (j.echo_mos != null) lines.push(`echo_mos: ${j.echo_mos.toFixed(4)}`);
-      if (j.deg_mos != null) lines.push(`deg_mos:  ${j.deg_mos.toFixed(4)}`);
-      if (j.erle != null) lines.push(`erle:     ${j.erle.toFixed(4)}`);
+      if (typeof j.echo_mos === 'number') lines.push(`echo_mos: ${j.echo_mos.toFixed(4)}`);
+      if (typeof j.deg_mos === 'number') lines.push(`deg_mos:  ${j.deg_mos.toFixed(4)}`);
+      if (typeof j.erle === 'number') lines.push(`erle:     ${j.erle.toFixed(4)}`);
       if (j.scenario) lines.push(`scenario: ${j.scenario}`);
       if (j.enh) lines.push(`enh:      ${j.enh}`);
       if (j.sample) lines.push(`sample:   ${j.sample}`);

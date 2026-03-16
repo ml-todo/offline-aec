@@ -3,137 +3,391 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AEC Comparison - TSPNN, DTLN-aec, WebRTC, Ours</title>
-    <script src="https://unpkg.com/wavesurfer.js@7"></script>
+    <title>AEC Comparison</title>
     <style>
-        *{margin:0;padding:0;box-sizing:border-box}
-        body{font-family:system-ui;background:#0d0d12;color:#e8e8f0;padding:20px}
-        h1{text-align:center;font-size:24px;background:linear-gradient(90deg,#00d4ff,#ff006e);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:16px}
-        .ctrl{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap}
-        select,button{font:inherit;padding:8px 12px;background:#15151d;border:1px solid #252532;border-radius:6px;color:#e8e8f0;cursor:pointer}
-        .load{background:linear-gradient(90deg,#00d4ff,#9d4edd);border:0;color:#000}
-        .tracks{display:flex;flex-direction:column;gap:8px}
-        .t{background:#15151d;border:1px solid #252532;border-radius:8px;padding:10px;border-left:3px solid var(--c);transition:opacity .3s,filter .3s}
-        .t.off{opacity:.35;filter:grayscale(1)}
-        .t .h{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;font-size:13px}
-        .t .l{color:#666;font-size:11px;margin-left:8px}
-        .t .r{display:flex;align-items:center;gap:10px}
-        .t .time{font-family:monospace;font-size:11px;color:#666}
-        .play{width:28px;height:28px;border-radius:50%;background:var(--c);border:0;color:#000;cursor:pointer;font-size:11px}
-        .wf{height:50px;background:#0a0a0f;border-radius:4px;cursor:pointer}
-        .bar{height:3px;background:#1a1a24;border-radius:2px;margin-top:6px}
-        .bar div{height:100%;background:var(--c);border-radius:2px;width:0}
-        footer{text-align:center;margin-top:20px;font-size:12px;color:#666}
-        footer a{color:#00d4ff}
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: system-ui, sans-serif; background: #1e1e1e; color: #e0e0e0; padding: 20px; }
+        h1 { font-size: 1.25rem; margin-bottom: 1rem; }
+        .bar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 1.5rem; }
+        select, button { padding: 8px 12px; background: #333; border: 1px solid #555; border-radius: 6px; color: #eee; font-size: 14px; }
+        button.load { background: #0d9488; border-color: #0d9488; }
+        a { color: #7dd3fc; }
+        section { margin-bottom: 1.5rem; }
+        section h2 { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; margin-bottom: 0.5rem; }
+        .cards { display: grid; gap: 6px; }
+        .card { background: #252525; border: 1px solid #404040; border-radius: 8px; padding: 8px 10px; transition: opacity 0.2s, filter 0.2s; }
+        body.has-playing .card:not(.playing) { opacity: 0.5; filter: grayscale(0.6); }
+        .card-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+        .card-title { font-weight: 600; font-size: 14px; }
+        .card-meta { font-size: 12px; color: #94a3b8; }
+        .wf-wrap { position: relative; height: 48px; background: #1a1a1a; border-radius: 4px; overflow: hidden; } /* height matches WF_HEIGHT in script */
+        .wf-wrap .wavesurfer { cursor: pointer; }
+        .wf-loading { display: none; position: absolute; inset: 0; align-items: center; justify-content: center; background: #1a1a1a; z-index: 3; border-radius: 4px; }
+        .wf-loading.visible { display: flex; }
+        .wf-loading::after { content: ''; width: 24px; height: 24px; border: 2px solid #404040; border-top-color: #22c55e; border-radius: 50%; animation: spin 0.7s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .card audio { display: none; }
+        .btn-play { width: 28px; height: 28px; border-radius: 50%; border: 1px solid #555; background: #333; color: #eee; font-size: 11px; cursor: pointer; flex-shrink: 0; line-height: 1; padding: 0; }
+        .btn-play:hover { background: #444; }
+        .score { font-size: 12px; color: #94a3b8; }
+        .score .v { color: #22d3ee; }
+        .missing { color: #64748b; font-style: italic; }
+        .ckpt-wrap select { min-width: 180px; font-size: 12px; }
+        footer { margin-top: 2rem; text-align: center; font-size: 12px; color: #64748b; }
     </style>
 </head>
 <body>
     <h1>AEC Comparison</h1>
-    <div class="ctrl">
-        <select id="sc"><option value="doubletalk">Double Talk</option><option value="farend-singletalk">Far-end Single Talk</option><option value="nearend-singletalk">Near-end Single Talk</option></select>
+    <div class="bar">
+        <select id="sc">
+            <option value="doubletalk">Double Talk</option>
+            <option value="farend-singletalk">Far-end Single Talk</option>
+            <option value="nearend-singletalk">Near-end Single Talk</option>
+        </select>
         <select id="sp"></select>
-        <select id="ck"></select>
-        <button onclick="rand()">🎲 Random</button>
-        <button class="load" onclick="load()">Load</button>
-        <button onclick="window.location.href='/evaluation/evaluate.html'">Evaluate (AECMOS)</button>
+        <button type="button" onclick="randomSample()">Random</button>
+        <button type="button" class="load" onclick="loadSample()">Load</button>
+        <a href="/evaluation/evaluate.html">AECMOS</a>
     </div>
-    <div class="tracks" id="tracks"></div>
+
+    <section>
+        <h2>Input</h2>
+        <div class="cards" id="input-cards"></div>
+    </section>
+    <section>
+        <h2>Outputs</h2>
+        <div class="cards" id="output-cards"></div>
+    </section>
+
     <footer>
-        TSPNN (offline) · DTLN-aec (online) · WebRTC AEC (online) · Our Model (online) ·
+        TSPNN · DTLN-aec · WebRTC AEC3 · Our Model ·
         <a href="https://github.com/microsoft/AEC-Challenge">AEC Challenge</a>
     </footer>
-<script>
-const T=[
-    {id:'far',name:'Far-end',label:'LPB · reference',c:'#00d4ff'},
-    {id:'near',name:'Near-end',label:'MIC · echo contaminated',c:'#ff006e'},
-    {id:'coarse',name:'TSPNN Coarse',label:'TSPNN intermediate (offline)',c:'#ffd700'},
-    {id:'out',name:'TSPNN Output',label:'TSPNN final (offline)',c:'#00ff88'},
-    {id:'dtln',name:'DTLN-aec',label:'online baseline',c:'#ff9f1c'},
-    {id:'webrtc',name:'WebRTC AEC',label:'online baseline',c:'#4cc9f0'},
-    {id:'ckpt',name:'Our Model',label:'your trained checkpoint (online)',c:'#9d4edd'}
-];
-let ws={},playing=null,samples=[],cur=null,sc='doubletalk';
-let blobUrls={dtln:null,webrtc:null,ckpt:null};
 
-document.getElementById('tracks').innerHTML=T.map(t=>`
-<div class="t" id="t-${t.id}" style="--c:${t.c}">
-    <div class="h"><span>${t.name}<span class="l">${t.label}</span></span>
-    <div class="r"><span class="time" id="tm-${t.id}">0:00/0:00</span><button class="play" onclick="play('${t.id}')">▶</button></div></div>
-    <div class="wf" id="wf-${t.id}"></div><div class="bar"><div id="b-${t.id}"></div></div>
-</div>`).join('');
+    <script src="https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.min.js"></script>
+    <script>
+        // --- Constants
+        const BASE = '/results';
+        const DEFAULT_CKPT = 'model/runs/full_aec_synth/ckpt_final.pt';
+        const MAX_SAMPLE_OPTIONS = 100;
+        const SAMPLE_LABEL_LEN = 12;
+        const WF_HEIGHT = 48;
 
-T.forEach(t=>{
-    ws[t.id]=WaveSurfer.create({container:`#wf-${t.id}`,waveColor:t.c,progressColor:t.c+'99',cursorColor:'#fff',cursorWidth:1,barWidth:2,barGap:1,height:50,normalize:true});
-    ws[t.id].on('audioprocess',()=>upd(t.id));
-    ws[t.id].on('finish',()=>stop(t.id));
-});
+        const TRACKS = [
+            { id: 'far', name: 'Far-end', meta: 'reference', scorable: false, input: true },
+            { id: 'near', name: 'Near-end', meta: 'echo contaminated', scorable: false, input: true },
+            { id: 'out', name: 'TSPNN Output', meta: 'offline', scorable: true, input: false },
+            { id: 'dtln', name: 'DTLN-aec', meta: 'baseline', scorable: true, input: false },
+            { id: 'webrtc_aec3', name: 'WebRTC AEC3', meta: 'Node', scorable: true, input: false },
+            { id: 'ckpt', name: 'Our Model', meta: 'checkpoint', scorable: true, input: false, showCkpt: true }
+        ];
 
-const fmt=s=>`${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`;
-const upd=id=>{let w=ws[id],d=w.getDuration()||1,c=w.getCurrentTime();document.getElementById(`tm-${id}`).textContent=`${fmt(c)}/${fmt(d)}`;document.getElementById(`b-${id}`).style.width=`${c/d*100}%`};
-const grey=()=>T.forEach(t=>document.getElementById(`t-${t.id}`).classList.toggle('off',playing&&playing!==t.id));
+        // --- State
+        let scenario = 'doubletalk';
+        let sampleList = [];
+        let currentSample = null;
+        const blobUrls = {};
+        const wavesurfers = {};
+        let lastSyncedTime = 0;
+        let playingTrackId = null;
+        /** Cached refs for hot paths (filled after DOM render). */
+        let trackRefs = [];
 
-function play(id){
-    if(playing&&playing!==id){ws[playing].pause();document.querySelector(`#t-${playing} .play`).textContent='▶'}
-    if(playing===id&&ws[id].isPlaying()){ws[id].pause();document.querySelector(`#t-${id} .play`).textContent='▶';playing=null;grey();return}
-    ws[id].play();document.querySelector(`#t-${id} .play`).textContent='⏸';playing=id;grey();
-}
-function stop(id){document.querySelector(`#t-${id} .play`).textContent='▶';if(playing===id)playing=null;grey()}
+        // --- WaveSurfer
+        function destroyWaveSurfer(id) {
+            const ws = wavesurfers[id];
+            if (ws) {
+                try { ws.destroy(); } catch (_) {}
+                delete wavesurfers[id];
+            }
+        }
 
-async function loadList(){
-    try{samples=await(await fetch(`/evaluation/samples_${sc.replace('-','_')}.json`)).json()}catch{samples=[]}
-    document.getElementById('sp').innerHTML=samples.slice(0,100).map(s=>`<option value="${s}">${s.slice(0,10)}...</option>`).join('');
-    cur=samples[0]||null;
-}
+        function createWaveSurfer(id, audio, url) {
+            destroyWaveSurfer(id);
+            const container = document.getElementById('wf-' + id);
+            if (!container || !window.WaveSurfer) return;
+            try {
+                const ws = WaveSurfer.create({
+                    container,
+                    media: audio,
+                    waveColor: '#22c55e',
+                    progressColor: '#f97316',
+                    height: WF_HEIGHT,
+                    barWidth: 2,
+                    normalize: true
+                });
+                ws.load(url);
+                ws.on('interaction', () => {
+                    const t = ws.getCurrentTime();
+                    if (isFinite(t)) syncAllToTime(t);
+                });
+                wavesurfers[id] = ws;
+            } catch (e) {
+                console.warn('WaveSurfer create failed for ' + id, e);
+            }
+        }
 
-async function loadCheckpoints(){
-    const sel=document.getElementById('ck');
-    try{
-        const j=await(await fetch('/api/checkpoints')).json();
-        const arr=(j && j.checkpoints) ? j.checkpoints : [];
-        sel.innerHTML = arr.map(p=>`<option value="${p}">${p}</option>`).join('');
-        const prefer = arr.find(p=>p.includes('runs/full_aec_synth/ckpt_final.pt')) || arr.find(p=>p.includes('ckpt_final'));
-        if (prefer) sel.value = prefer;
-    }catch{
-        sel.innerHTML = `<option value="external/TSPNN/runs/full_aec_synth/ckpt_final.pt">TSPNN ckpt</option>`;
-    }
-}
-async function load(){
-    if(!cur)return;if(playing){ws[playing].pause();stop(playing)}
-    const b='/results',f=sc;
-    const ck=document.getElementById('ck').value || 'external/TSPNN/runs/full_aec_synth/ckpt_final.pt';
+        // --- Sync & playhead (RAF only while playing to save CPU)
+        function syncAllToTime(seconds) {
+            const t = Math.max(0, seconds);
+            lastSyncedTime = t;
+            for (const ref of trackRefs) {
+                if (ref.audio && ref.audio.src) {
+                    const d = ref.audio.duration;
+                    if (isFinite(d) && d > 0) ref.audio.currentTime = Math.min(t, d);
+                }
+                const ws = wavesurfers[ref.id];
+                if (ws) ws.setTime(t);
+            }
+        }
 
-    async function loadEnhanced(id, url){
-        try{
-            const resp = await fetch(url);
-            if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
-            if(blobUrls[id]) URL.revokeObjectURL(blobUrls[id]);
-            blobUrls[id] = URL.createObjectURL(await resp.blob());
-            await ws[id].load(blobUrls[id]);
-        }catch(e){ console.error(id+' load error', e); }
-    }
-    const dtlnPromise = loadEnhanced('dtln', `/api/enhance_dtln_sample?scenario=${encodeURIComponent(f)}&sample=${encodeURIComponent(cur)}`);
-    const webrtcPromise = loadEnhanced('webrtc', `/api/enhance_webrtc_sample?scenario=${encodeURIComponent(f)}&sample=${encodeURIComponent(cur)}`);
-    const ckptPromise = loadEnhanced('ckpt', `/api/enhance_sample?scenario=${encodeURIComponent(f)}&sample=${encodeURIComponent(cur)}&ckpt=${encodeURIComponent(ck)}`);
+        function updatePlayheadFromPlaying() {
+            if (!playingTrackId) return;
+            const ref = trackRefs.find(r => r.id === playingTrackId);
+            if (ref && ref.audio && !ref.audio.paused) {
+                const t = ref.audio.currentTime;
+                for (const r of trackRefs) {
+                    if (r.id === playingTrackId) continue;
+                    const ws = wavesurfers[r.id];
+                    if (ws) ws.setTime(t);
+                }
+            }
+            requestAnimationFrame(updatePlayheadFromPlaying);
+        }
 
-    await Promise.all([
-        ws.far.load(`${b}/blind_test_set_interspeech2021/${f}/${cur}_lpb.wav`).catch(()=>{}),
-        ws.near.load(`${b}/blind_test_set_interspeech2021/${f}/${cur}_mic.wav`).catch(()=>{}),
-        ws.coarse.load(`${b}/output/coarse_stage/${f}/${cur}_mic.wav`).catch(()=>{}),
-        ws.out.load(`${b}/output/ours/${f}/${cur}_mic.wav`).catch(()=>{}),
-        dtlnPromise,
-        webrtcPromise,
-        ckptPromise
-    ]);
-    T.forEach(t=>upd(t.id));
-}
-function rand(){cur=samples[Math.floor(Math.random()*samples.length)];document.getElementById('sp').value=cur;load()}
+        // --- DOM
+        function cardHtml(t) {
+            const ckpt = t.showCkpt ? '<span class="ckpt-wrap" id="ckpt-wrap"></span>' : '';
+            return `
+                <div class="card" id="card-${t.id}">
+                    <div class="card-header">
+                        <button type="button" class="btn-play" id="btn-${t.id}" title="Play / Pause">▶</button>
+                        <span class="card-title">${t.name}</span>
+                        <span class="card-meta">${t.meta}</span>
+                        ${ckpt}
+                        <span class="score" id="score-${t.id}"></span>
+                        <audio id="audio-${t.id}" preload="none"></audio>
+                    </div>
+                    <div class="wf-wrap">
+                        <div class="wf-loading" id="loading-${t.id}" aria-hidden="true"></div>
+                        <div class="wf-container" id="wf-${t.id}"></div>
+                    </div>
+                </div>`;
+        }
 
-document.getElementById('sc').onchange=e=>{sc=e.target.value;loadList()};
-document.getElementById('sp').onchange=e=>cur=e.target.value;
-document.getElementById('ck').onchange=_=>{ if(cur) load(); };
-document.onkeydown=e=>{if(e.code==='Space'&&e.target.tagName!=='SELECT'){e.preventDefault();play(playing||'far')}};
-loadList();
-loadCheckpoints();
-</script>
+        document.getElementById('input-cards').innerHTML = TRACKS.filter(t => t.input).map(cardHtml).join('');
+        document.getElementById('output-cards').innerHTML = TRACKS.filter(t => !t.input).map(cardHtml).join('');
+
+        trackRefs = TRACKS.map(tr => ({
+            ...tr,
+            audio: document.getElementById('audio-' + tr.id),
+            btn: document.getElementById('btn-' + tr.id),
+            card: document.getElementById('card-' + tr.id),
+            scoreEl: document.getElementById('score-' + tr.id)
+        }));
+
+        function setPlayingCard(id) {
+            for (const ref of trackRefs) {
+                if (ref.card) ref.card.classList.toggle('playing', ref.id === id);
+            }
+            document.body.classList.toggle('has-playing', !!id);
+        }
+
+        function stopAllPlayback() {
+            for (const ref of trackRefs) {
+                if (ref.audio) ref.audio.pause();
+                if (ref.btn) ref.btn.textContent = '▶';
+            }
+            playingTrackId = null;
+            setPlayingCard(null);
+        }
+
+        for (const ref of trackRefs) {
+            if (!ref.btn || !ref.audio) continue;
+            ref.btn.onclick = () => {
+                if (ref.audio.paused) {
+                    stopAllPlayback();
+                    const d = ref.audio.duration;
+                    if (isFinite(d) && d > 0) ref.audio.currentTime = Math.min(lastSyncedTime, d);
+                    ref.audio.play();
+                    ref.btn.textContent = '⏸';
+                    playingTrackId = ref.id;
+                    setPlayingCard(ref.id);
+                    requestAnimationFrame(updatePlayheadFromPlaying);
+                } else {
+                    stopAllPlayback();
+                }
+            };
+            ref.audio.onended = () => {
+                if (isFinite(ref.audio.duration)) syncAllToTime(ref.audio.duration);
+                stopAllPlayback();
+            };
+            ref.audio.onpause = () => {
+                if (ref.btn.textContent === '⏸') stopAllPlayback();
+            };
+        }
+
+        // --- Helpers
+        function setLoading(id, show) {
+            const el = document.getElementById('loading-' + id);
+            if (el) el.classList.toggle('visible', !!show);
+        }
+
+        function getCheckpointValue() {
+            const el = document.getElementById('ck');
+            return (el && el.value) ? el.value : DEFAULT_CKPT;
+        }
+
+        function revokeAll() {
+            Object.values(blobUrls).forEach(url => { try { URL.revokeObjectURL(url); } catch (_) {} });
+            Object.keys(blobUrls).forEach(k => delete blobUrls[k]);
+        }
+
+        function setScore(id, data) {
+            const el = document.getElementById('score-' + id);
+            if (!el) return;
+            if (data && data.error) { el.textContent = 'error'; el.classList.add('missing'); return; }
+            if (data && data.echo_mos != null && data.deg_mos != null) {
+                el.innerHTML = `echo:<span class="v">${data.echo_mos.toFixed(2)}</span> deg:<span class="v">${data.deg_mos.toFixed(2)}</span>`;
+                el.classList.remove('missing');
+            } else { el.textContent = '—'; }
+        }
+
+        function setMissing(id, missing) {
+            const el = document.getElementById('score-' + id);
+            if (!el) return;
+            if (missing) { el.textContent = 'file not found'; el.classList.add('missing'); }
+        }
+
+        // --- Load & score
+        async function fetchBlob(url) {
+            const r = await fetch(url);
+            if (!r.ok) return null;
+            return await r.blob();
+        }
+
+        async function scoreTrack(id, blob) {
+            if (!blob || !currentSample) return;
+            const fd = new FormData();
+            fd.append('scenario', scenario);
+            fd.append('sample', currentSample);
+            fd.append('method', id);
+            fd.append('enh_wav', blob, 'enh.wav');
+            try {
+                const res = await fetch('/api/aecmos_score', { method: 'POST', body: fd });
+                const j = await res.json();
+                setScore(id, j);
+            } catch (e) { setScore(id, { error: true }); }
+        }
+
+        async function loadSample() {
+            if (!currentSample) return;
+            revokeAll();
+            for (const ref of trackRefs) {
+                setScore(ref.id, null);
+                destroyWaveSurfer(ref.id);
+                setLoading(ref.id, true);
+            }
+            syncAllToTime(0);
+
+            const ck = getCheckpointValue();
+            const s = scenario;
+
+            const tasks = [
+                { id: 'far', url: `${BASE}/blind_test_set_interspeech2021/${s}/${currentSample}_lpb.wav` },
+                { id: 'near', url: `${BASE}/blind_test_set_interspeech2021/${s}/${currentSample}_mic.wav` },
+                { id: 'out', url: `/api/out_sample?scenario=${encodeURIComponent(s)}&sample=${encodeURIComponent(currentSample)}` },
+                { id: 'dtln', url: `/api/enhance_dtln_sample?scenario=${encodeURIComponent(s)}&sample=${encodeURIComponent(currentSample)}` },
+                { id: 'webrtc_aec3', url: `/api/enhance_webrtc_aec3_sample?scenario=${encodeURIComponent(s)}&sample=${encodeURIComponent(currentSample)}` },
+                { id: 'ckpt', url: `/api/enhance_sample?scenario=${encodeURIComponent(s)}&sample=${encodeURIComponent(currentSample)}&ckpt=${encodeURIComponent(ck)}` }
+            ];
+
+            const applyBlob = (id, blob) => {
+                const ref = trackRefs.find(r => r.id === id);
+                const audio = ref ? ref.audio : document.getElementById('audio-' + id);
+                if (!audio) return;
+                setLoading(id, false);
+                if (blob) {
+                    const urlObj = URL.createObjectURL(blob);
+                    blobUrls[id] = urlObj;
+                    audio.src = urlObj;
+                    audio.load();
+                    createWaveSurfer(id, audio, urlObj);
+                    const tr = TRACKS.find(x => x.id === id);
+                    if (tr && tr.scorable) scoreTrack(id, blob);
+                } else {
+                    audio.removeAttribute('src');
+                    destroyWaveSurfer(id);
+                    setMissing(id, true);
+                }
+            };
+            await Promise.allSettled(
+                tasks.map(({ id, url }) =>
+                    fetchBlob(url).then(b => applyBlob(id, b)).catch(() => applyBlob(id, null))
+                )
+            );
+        }
+
+        async function loadSampleList() {
+            try {
+                const r = await fetch(`/evaluation/samples_${scenario.replace(/-/g, '_')}.json`);
+                sampleList = await r.json();
+            } catch { sampleList = []; }
+            const sp = document.getElementById('sp');
+            if (!sp) return;
+            sp.innerHTML = sampleList.slice(0, MAX_SAMPLE_OPTIONS).map(s => `<option value="${s}">${s.slice(0, SAMPLE_LABEL_LEN)}…</option>`).join('');
+            currentSample = sampleList[0] || null;
+            if (currentSample) sp.value = currentSample;
+        }
+
+        function loadCheckpoints() {
+            const wrap = document.getElementById('ckpt-wrap');
+            if (!wrap) return;
+            fetch('/api/checkpoints')
+                .then(r => r.json())
+                .then(j => {
+                    const list = (j && j.checkpoints) ? j.checkpoints : [];
+                    const sel = document.createElement('select');
+                    sel.id = 'ck';
+                    list.forEach(p => { const o = document.createElement('option'); o.value = p; o.textContent = p; sel.appendChild(o); });
+                    const def = list.find(p => p.includes('ckpt_final')) || list[0];
+                    if (def) sel.value = def;
+                    wrap.innerHTML = '';
+                    wrap.appendChild(sel);
+                    sel.onchange = () => { if (currentSample) loadSample(); };
+                })
+                .catch(() => {
+                    const sel = document.createElement('select');
+                    sel.id = 'ck';
+                    sel.innerHTML = `<option value="${DEFAULT_CKPT}">default</option>`;
+                    wrap.innerHTML = '';
+                    wrap.appendChild(sel);
+                });
+        }
+
+        function randomSample() {
+            if (!sampleList.length) return;
+            currentSample = sampleList[Math.floor(Math.random() * sampleList.length)];
+            const sp = document.getElementById('sp');
+            if (sp) {
+                const has = Array.from(sp.options).some(o => o.value === currentSample);
+                if (!has) {
+                    const opt = document.createElement('option');
+                    opt.value = currentSample;
+                    opt.textContent = currentSample.slice(0, SAMPLE_LABEL_LEN) + '…';
+                    sp.insertBefore(opt, sp.firstChild);
+                }
+                sp.value = currentSample;
+            }
+            loadSample();
+        }
+
+        // --- Events & init
+        document.getElementById('sc').onchange = e => { scenario = e.target.value; loadSampleList(); };
+        document.getElementById('sp').onchange = e => { currentSample = e.target.value; };
+
+        loadSampleList();
+        loadCheckpoints();
+    </script>
 </body>
 </html>

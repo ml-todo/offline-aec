@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 """Generate sample list JSON from external/TSPNN/results. Run: python evaluation/generate_samples.py"""
+from __future__ import annotations
 
 import json
 from pathlib import Path
 
 
 def get_sample_base_names(directory: Path) -> list[str]:
+    """List base names (stem minus '_mic') of *_mic.wav files in directory."""
     if not directory.exists():
         print(f"Warning: {directory} not found")
         return []
     return sorted({f.stem[:-4] for f in directory.iterdir() if f.name.endswith("_mic.wav")})
 
 
-def main():
+def main() -> None:
     root = Path(__file__).parent.parent
     output_dir = root / "external" / "TSPNN" / "results" / "output" / "ours"
     eval_dir = Path(__file__).parent
