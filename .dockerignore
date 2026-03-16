@@ -1,0 +1,5 @@
+external/
+model/runs/
+tmp/
+__pycache__/
+.git/

@@ -1,10 +1,25 @@
 # Our AEC Model
 
-This directory is for **your model** and training code. Place trained checkpoints in `runs/`; they will appear in the evaluation page's checkpoint dropdown.
+This directory provides the enhancement interface used by the evaluation server.
 
-The evaluation server loads checkpoints using the same interface as TSPNN (see `external/TSPNN/train/models/tspnn.py`). To add your own model:
+## How it works
 
-- Reuse the TSPNN training scaffold: copy from `external/TSPNN/train/` and adapt
-- Or implement a compatible checkpoint format (PyTorch state dict + `cfg` dict)
+The server calls `model.enhance.enhance(lpb, mic, checkpoint_path)` for the "Our Model" track. The default implementation loads TSPNN-compatible checkpoints from `external/TSPNN/train/`.
 
-See `external/TSPNN/train/README.md` for training setup and data preparation.
+## Adding your own model
+
+Edit `enhance.py` and replace `_load_model()` with your architecture. The contract is:
+
+```python
+def enhance(lpb: np.ndarray, mic: np.ndarray, checkpoint_path: str) -> np.ndarray:
+    """
+    Args:
+        lpb: far-end reference, float32, 16 kHz mono
+        mic: microphone signal, float32, 16 kHz mono
+        checkpoint_path: path to .pt checkpoint
+    Returns:
+        enhanced signal, float32, 16 kHz mono
+    """
+```
+
+Place checkpoints in `runs/`; they appear in the evaluation page dropdown.

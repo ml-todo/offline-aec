@@ -1,7 +1,22 @@
 __pycache__/
 *.pyc
 *.pyo
+*.py[cod]
 tmp/
 runs/
 *.egg-info/
+.eggs/
+dist/
+build/
+node_modules/
 .DS_Store
+*.log
+.env
+.env.local
+.venv/
+venv/
+*.swp
+*.swo
+
+# Local clone; we use npm package in evaluation/webrtc-aec3-node
+external/webrtcaec3.js/

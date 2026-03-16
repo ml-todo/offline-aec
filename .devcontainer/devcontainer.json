@@ -1,0 +1,14 @@
+{
+  "name": "offline-aec",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "forwardPorts": [8888],
+  "postCreateCommand": "git submodule update --init --recursive",
+  "customizations": {
+    "vscode": {
+      "extensions": ["ms-python.python"]
+    }
+  }
+}
