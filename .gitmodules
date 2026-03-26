@@ -1,0 +1,6 @@
+[submodule "external/TSPNN"]
+	path = external/TSPNN
+	url = https://github.com/enhancer12/TSPNN.git
+[submodule "external/DTLN-aec"]
+	path = external/DTLN-aec
+	url = https://github.com/breizhn/DTLN-aec.git

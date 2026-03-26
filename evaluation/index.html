@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AEC Comparison</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: system-ui, sans-serif; background: #1e1e1e; color: #e0e0e0; padding: 20px; }
+        h1 { font-size: 1.25rem; margin-bottom: 1rem; }
+        .bar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 1.5rem; }
+        select, button { padding: 8px 12px; background: #333; border: 1px solid #555; border-radius: 6px; color: #eee; font-size: 14px; }
+        button.load { background: #0d9488; border-color: #0d9488; }
+        a { color: #7dd3fc; }
+        section { margin-bottom: 1.5rem; }
+        section h2 { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; margin-bottom: 0.5rem; }
+        .cards { display: grid; gap: 6px; }
+        .card { background: #252525; border: 1px solid #404040; border-radius: 8px; padding: 8px 10px; transition: opacity 0.2s, filter 0.2s; }
+        body.has-playing .card:not(.playing) { opacity: 0.5; filter: grayscale(0.6); }
+        .card-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+        .card-title { font-weight: 600; font-size: 14px; }
+        .card-meta { font-size: 12px; color: #94a3b8; }
+        .wf-wrap { position: relative; height: 48px; background: #1a1a1a; border-radius: 4px; overflow: hidden; } /* height matches WF_HEIGHT in script */
+        .wf-wrap .wavesurfer { cursor: pointer; }
+        .wf-loading { display: none; position: absolute; inset: 0; align-items: center; justify-content: center; background: #1a1a1a; z-index: 3; border-radius: 4px; }
+        .wf-loading.visible { display: flex; }
+        .wf-loading::after { content: ''; width: 24px; height: 24px; border: 2px solid #404040; border-top-color: #22c55e; border-radius: 50%; animation: spin 0.7s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .card audio { display: none; }
+        .btn-play { width: 28px; height: 28px; border-radius: 50%; border: 1px solid #555; background: #333; color: #eee; font-size: 11px; cursor: pointer; flex-shrink: 0; line-height: 1; padding: 0; }
+        .btn-play:hover { background: #444; }
+        .score { font-size: 12px; color: #94a3b8; }
+        .score .v { color: #22d3ee; }
+        .missing { color: #64748b; font-style: italic; }
+        .ckpt-wrap select { min-width: 180px; font-size: 12px; }
+        footer { margin-top: 2rem; text-align: center; font-size: 12px; color: #64748b; }
+    </style>
+</head>
+<body>
+    <h1>AEC Comparison</h1>
+    <div class="bar">
+        <select id="sc">
+            <option value="doubletalk">Double Talk</option>
+            <option value="farend-singletalk">Far-end Single Talk</option>
+            <option value="nearend-singletalk">Near-end Single Talk</option>
+        </select>
+        <select id="sp"></select>
+        <button type="button" onclick="randomSample()">Random</button>
+        <button type="button" class="load" onclick="loadSample()">Load</button>
+        <a href="/evaluation/evaluate.html">AECMOS</a>
+    </div>
+
+    <section>
+        <h2>Input</h2>
+        <div class="cards" id="input-cards"></div>
+    </section>
+    <section>
+        <h2>Outputs</h2>
+        <div class="cards" id="output-cards"></div>
+    </section>
+
+    <footer>
+        TSPNN · DTLN-aec · WebRTC AEC3 · Our Model ·
+        <a href="https://github.com/microsoft/AEC-Challenge">AEC Challenge</a>
+    </footer>
+
+    <script src="https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.min.js"></script>
+    <script>
+        // --- Constants
+        const BASE = '/results';
+        const DEFAULT_CKPT = 'model/runs/full_aec_synth/ckpt_final.pt';
+        const MAX_SAMPLE_OPTIONS = 100;
+        const SAMPLE_LABEL_LEN = 12;
+        const WF_HEIGHT = 48;
+
+        const TRACKS = [
+            { id: 'far', name: 'Far-end', meta: 'reference', scorable: false, input: true },
+            { id: 'near', name: 'Near-end', meta: 'echo contaminated', scorable: false, input: true },
+            { id: 'out', name: 'TSPNN Output', meta: 'offline', scorable: true, input: false },
+            { id: 'dtln', name: 'DTLN-aec', meta: 'baseline', scorable: true, input: false },
+            { id: 'webrtc_aec3', name: 'WebRTC AEC3', meta: 'Node', scorable: true, input: false },
+            { id: 'ckpt', name: 'Our Model', meta: 'checkpoint', scorable: true, input: false, showCkpt: true }
+        ];
+
+        // --- State
+        let scenario = 'doubletalk';
+        let sampleList = [];
+        let currentSample = null;
+        const blobUrls = {};
+        const wavesurfers = {};
+        let lastSyncedTime = 0;
+        let playingTrackId = null;
+        /** Cached refs for hot paths (filled after DOM render). */
+        let trackRefs = [];
+
+        // --- WaveSurfer
+        function destroyWaveSurfer(id) {
+            const ws = wavesurfers[id];
+            if (ws) {
+                try { ws.destroy(); } catch (_) {}
+                delete wavesurfers[id];
+            }
+        }
+
+        function createWaveSurfer(id, audio, url) {
+            destroyWaveSurfer(id);
+            const container = document.getElementById('wf-' + id);
+            if (!container || !window.WaveSurfer) return;
+            try {
+                const ws = WaveSurfer.create({
+                    container,
+                    media: audio,
+                    waveColor: '#22c55e',
+                    progressColor: '#f97316',
+                    height: WF_HEIGHT,
+                    barWidth: 2,
+                    normalize: true
+                });
+                ws.load(url);
+                ws.on('interaction', () => {
+                    const t = ws.getCurrentTime();
+                    if (isFinite(t)) syncAllToTime(t);
+                });
+                wavesurfers[id] = ws;
+            } catch (e) {
+                console.warn('WaveSurfer create failed for ' + id, e);
+            }
+        }
+
+        // --- Sync & playhead (RAF only while playing to save CPU)
+        function syncAllToTime(seconds) {
+            const t = Math.max(0, seconds);
+            lastSyncedTime = t;
+            for (const ref of trackRefs) {
+                if (ref.audio && ref.audio.src) {
+                    const d = ref.audio.duration;
+                    if (isFinite(d) && d > 0) ref.audio.currentTime = Math.min(t, d);
+                }
+                const ws = wavesurfers[ref.id];
+                if (ws) ws.setTime(t);
+            }
+        }
+
+        function updatePlayheadFromPlaying() {
+            if (!playingTrackId) return;
+            const ref = trackRefs.find(r => r.id === playingTrackId);
+            if (ref && ref.audio && !ref.audio.paused) {
+                const t = ref.audio.currentTime;
+                for (const r of trackRefs) {
+                    if (r.id === playingTrackId) continue;
+                    const ws = wavesurfers[r.id];
+                    if (ws) ws.setTime(t);
+                }
+            }
+            requestAnimationFrame(updatePlayheadFromPlaying);
+        }
+
+        // --- DOM
+        function cardHtml(t) {
+            const ckpt = t.showCkpt ? '<span class="ckpt-wrap" id="ckpt-wrap"></span>' : '';
+            return `
+                <div class="card" id="card-${t.id}">
+                    <div class="card-header">
+                        <button type="button" class="btn-play" id="btn-${t.id}" title="Play / Pause">▶</button>
+                        <span class="card-title">${t.name}</span>
+                        <span class="card-meta">${t.meta}</span>
+                        ${ckpt}
+                        <span class="score" id="score-${t.id}"></span>
+                        <audio id="audio-${t.id}" preload="none"></audio>
+                    </div>
+                    <div class="wf-wrap">
+                        <div class="wf-loading" id="loading-${t.id}" aria-hidden="true"></div>
+                        <div class="wf-container" id="wf-${t.id}"></div>
+                    </div>
+                </div>`;
+        }
+
+        document.getElementById('input-cards').innerHTML = TRACKS.filter(t => t.input).map(cardHtml).join('');
+        document.getElementById('output-cards').innerHTML = TRACKS.filter(t => !t.input).map(cardHtml).join('');
+
+        trackRefs = TRACKS.map(tr => ({
+            ...tr,
+            audio: document.getElementById('audio-' + tr.id),
+            btn: document.getElementById('btn-' + tr.id),
+            card: document.getElementById('card-' + tr.id),
+            scoreEl: document.getElementById('score-' + tr.id)
+        }));
+
+        function setPlayingCard(id) {
+            for (const ref of trackRefs) {
+                if (ref.card) ref.card.classList.toggle('playing', ref.id === id);
+            }
+            document.body.classList.toggle('has-playing', !!id);
+        }
+
+        function stopAllPlayback() {
+            for (const ref of trackRefs) {
+                if (ref.audio) ref.audio.pause();
+                if (ref.btn) ref.btn.textContent = '▶';
+            }
+            playingTrackId = null;
+            setPlayingCard(null);
+        }
+
+        for (const ref of trackRefs) {
+            if (!ref.btn || !ref.audio) continue;
+            ref.btn.onclick = () => {
+                if (ref.audio.paused) {
+                    stopAllPlayback();
+                    const d = ref.audio.duration;
+                    if (isFinite(d) && d > 0) ref.audio.currentTime = Math.min(lastSyncedTime, d);
+                    ref.audio.play();
+                    ref.btn.textContent = '⏸';
+                    playingTrackId = ref.id;
+                    setPlayingCard(ref.id);
+                    requestAnimationFrame(updatePlayheadFromPlaying);
+                } else {
+                    stopAllPlayback();
+                }
+            };
+            ref.audio.onended = () => {
+                if (isFinite(ref.audio.duration)) syncAllToTime(ref.audio.duration);
+                stopAllPlayback();
+            };
+            ref.audio.onpause = () => {
+                if (ref.btn.textContent === '⏸') stopAllPlayback();
+            };
+        }
+
+        // --- Helpers
+        function setLoading(id, show) {
+            const el = document.getElementById('loading-' + id);
+            if (el) el.classList.toggle('visible', !!show);
+        }
+
+        function getCheckpointValue() {
+            const el = document.getElementById('ck');
+            return (el && el.value) ? el.value : DEFAULT_CKPT;
+        }
+
+        function revokeAll() {
+            Object.values(blobUrls).forEach(url => { try { URL.revokeObjectURL(url); } catch (_) {} });
+            Object.keys(blobUrls).forEach(k => delete blobUrls[k]);
+        }
+
+        function setScore(id, data) {
+            const el = document.getElementById('score-' + id);
+            if (!el) return;
+            if (data && data.error) { el.textContent = 'error'; el.classList.add('missing'); return; }
+            if (data && data.echo_mos != null && data.deg_mos != null) {
+                el.innerHTML = `echo:<span class="v">${data.echo_mos.toFixed(2)}</span> deg:<span class="v">${data.deg_mos.toFixed(2)}</span>`;
+                el.classList.remove('missing');
+            } else { el.textContent = '—'; }
+        }
+
+        function setMissing(id, missing) {
+            const el = document.getElementById('score-' + id);
+            if (!el) return;
+            if (missing) { el.textContent = 'file not found'; el.classList.add('missing'); }
+        }
+
+        // --- Load & score
+        async function fetchBlob(url) {
+            const r = await fetch(url);
+            if (!r.ok) return null;
+            return await r.blob();
+        }
+
+        async function scoreTrack(id, blob) {
+            if (!blob || !currentSample) return;
+            const fd = new FormData();
+            fd.append('scenario', scenario);
+            fd.append('sample', currentSample);
+            fd.append('method', id);
+            fd.append('enh_wav', blob, 'enh.wav');
+            try {
+                const res = await fetch('/api/aecmos_score', { method: 'POST', body: fd });
+                const j = await res.json();
+                setScore(id, j);
+            } catch (e) { setScore(id, { error: true }); }
+        }
+
+        async function loadSample() {
+            if (!currentSample) return;
+            revokeAll();
+            for (const ref of trackRefs) {
+                setScore(ref.id, null);
+                destroyWaveSurfer(ref.id);
+                setLoading(ref.id, true);
+            }
+            syncAllToTime(0);
+
+            const ck = getCheckpointValue();
+            const s = scenario;
+
+            const tasks = [
+                { id: 'far', url: `${BASE}/blind_test_set_interspeech2021/${s}/${currentSample}_lpb.wav` },
+                { id: 'near', url: `${BASE}/blind_test_set_interspeech2021/${s}/${currentSample}_mic.wav` },
+                { id: 'out', url: `/api/out_sample?scenario=${encodeURIComponent(s)}&sample=${encodeURIComponent(currentSample)}` },
+                { id: 'dtln', url: `/api/enhance_dtln_sample?scenario=${encodeURIComponent(s)}&sample=${encodeURIComponent(currentSample)}` },
+                { id: 'webrtc_aec3', url: `/api/enhance_webrtc_aec3_sample?scenario=${encodeURIComponent(s)}&sample=${encodeURIComponent(currentSample)}` },
+                { id: 'ckpt', url: `/api/enhance_sample?scenario=${encodeURIComponent(s)}&sample=${encodeURIComponent(currentSample)}&ckpt=${encodeURIComponent(ck)}` }
+            ];
+
+            const applyBlob = (id, blob) => {
+                const ref = trackRefs.find(r => r.id === id);
+                const audio = ref ? ref.audio : document.getElementById('audio-' + id);
+                if (!audio) return;
+                setLoading(id, false);
+                if (blob) {
+                    const urlObj = URL.createObjectURL(blob);
+                    blobUrls[id] = urlObj;
+                    audio.src = urlObj;
+                    audio.load();
+                    createWaveSurfer(id, audio, urlObj);
+                    const tr = TRACKS.find(x => x.id === id);
+                    if (tr && tr.scorable) scoreTrack(id, blob);
+                } else {
+                    audio.removeAttribute('src');
+                    destroyWaveSurfer(id);
+                    setMissing(id, true);
+                }
+            };
+            await Promise.allSettled(
+                tasks.map(({ id, url }) =>
+                    fetchBlob(url).then(b => applyBlob(id, b)).catch(() => applyBlob(id, null))
+                )
+            );
+        }
+
+        async function loadSampleList() {
+            try {
+                const r = await fetch(`/evaluation/samples_${scenario.replace(/-/g, '_')}.json`);
+                sampleList = await r.json();
+            } catch { sampleList = []; }
+            const sp = document.getElementById('sp');
+            if (!sp) return;
+            sp.innerHTML = sampleList.slice(0, MAX_SAMPLE_OPTIONS).map(s => `<option value="${s}">${s.slice(0, SAMPLE_LABEL_LEN)}…</option>`).join('');
+            currentSample = sampleList[0] || null;
+            if (currentSample) sp.value = currentSample;
+        }
+
+        function loadCheckpoints() {
+            const wrap = document.getElementById('ckpt-wrap');
+            if (!wrap) return;
+            fetch('/api/checkpoints')
+                .then(r => r.json())
+                .then(j => {
+                    const list = (j && j.checkpoints) ? j.checkpoints : [];
+                    const sel = document.createElement('select');
+                    sel.id = 'ck';
+                    list.forEach(p => { const o = document.createElement('option'); o.value = p; o.textContent = p; sel.appendChild(o); });
+                    const def = list.find(p => p.includes('ckpt_final')) || list[0];
+                    if (def) sel.value = def;
+                    wrap.innerHTML = '';
+                    wrap.appendChild(sel);
+                    sel.onchange = () => { if (currentSample) loadSample(); };
+                })
+                .catch(() => {
+                    const sel = document.createElement('select');
+                    sel.id = 'ck';
+                    sel.innerHTML = `<option value="${DEFAULT_CKPT}">default</option>`;
+                    wrap.innerHTML = '';
+                    wrap.appendChild(sel);
+                });
+        }
+
+        function randomSample() {
+            if (!sampleList.length) return;
+            currentSample = sampleList[Math.floor(Math.random() * sampleList.length)];
+            const sp = document.getElementById('sp');
+            if (sp) {
+                const has = Array.from(sp.options).some(o => o.value === currentSample);
+                if (!has) {
+                    const opt = document.createElement('option');
+                    opt.value = currentSample;
+                    opt.textContent = currentSample.slice(0, SAMPLE_LABEL_LEN) + '…';
+                    sp.insertBefore(opt, sp.firstChild);
+                }
+                sp.value = currentSample;
+            }
+            loadSample();
+        }
+
+        // --- Events & init
+        document.getElementById('sc').onchange = e => { scenario = e.target.value; loadSampleList(); };
+        document.getElementById('sp').onchange = e => { currentSample = e.target.value; };
+
+        loadSampleList();
+        loadCheckpoints();
+    </script>
+</body>
+</html>
